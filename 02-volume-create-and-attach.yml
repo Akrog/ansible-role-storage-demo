@@ -1,0 +1,99 @@
+- name: Define storage controller
+  import_playbook: controller.yml
+
+- hosts: storage_controller
+  tasks:
+      - name: Get stats
+        storage:
+           resource: backend
+           state: stats
+        register: stats
+
+      - debug:
+           msg: "Backend {{stats.result.volume_backend_name}} has {{stats.result.pools[0].free_capacity_gb}} GB free out of {{stats.result.pools[0].total_capacity_gb}} GB"
+
+
+- hosts: storage_consumers
+  vars:
+    ansible_become: yes
+    storage_setup_consumers: no
+  roles:
+      - {role: storage, node_type: consumer}
+
+  tasks:
+      - name: Create volume
+        storage:
+            resource: volume
+            state: present
+            size: 1
+        register: vol
+      - debug:
+          msg: "Volume {{vol.id}} with {{vol.size}}GB created on {{vol.host}}"
+
+      - name: Connect volume
+        storage:
+            resource: volume
+            state: connected
+        register: conn
+      - debug:
+          msg: "Volume {{vol.id}} attached to {{conn.path}}"
+
+      - name: Partition volume
+        parted:
+            device: "{{conn.path}}"
+            flags: [ lvm ]
+            number: 1
+            state: present
+
+      - name: Format volume
+        filesystem:
+            fstype: ext4
+            dev: "{{conn.path}}1"
+
+      - name: Check partition size
+        command: "lsblk {{conn.path}}"
+        register: blk_size
+      - debug:
+          msg: "The full block device size: {{ blk_size.stdout_lines[1].split()[3] }} and the partition is {{blk_size.stdout_lines[2].split()[3]}}"
+
+      - name: Mount volume
+        mount:
+            fstype: ext4
+            src: "{{conn.path}}1"
+            path: "/mnt/mount-{{conn.path.split('/')[-1]}}"
+            state: mounted
+            boot: no
+
+      - name: Check mounted size
+        command: "df -h /mnt/mount-{{conn.path.split('/')[-1]}}"
+        register: mnt_size
+      - debug:
+          msg: "Mounted size {{mnt_size.stdout_lines[1].split()[1]}}"
+
+      - name: Get stats
+        storage:
+           resource: backend
+           state: stats
+        register: stats
+        delegate_to: "{{ groups.storage_controller[0] }}"
+
+      - debug:
+           msg: "Backend {{stats.result.volume_backend_name}} has {{stats.result.pools[0].free_capacity_gb}} GB free out of {{stats.result.pools[0].total_capacity_gb}} GB"
+
+      - name: Fill in some data
+        command: "dd count=204800 if=/dev/urandom of=/mnt/mount-{{conn.path.split('/')[-1]}}/my-file"
+        args:
+           creates: "/mnt/mount-{{conn.path.split('/')[-1]}}/my-file"
+
+      - name: Sync filesystem
+        command: "sync"
+
+      - name: Get stats
+        storage:
+           resource: backend
+           state: stats
+        register: stats
+        delegate_to: "{{ groups.storage_controller[0] }}"
+
+      - debug:
+           msg: "Backend {{stats.result.volume_backend_name}} has {{stats.result.pools[0].free_capacity_gb}} GB free out of {{stats.result.pools[0].total_capacity_gb}} GB"

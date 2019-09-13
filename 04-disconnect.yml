@@ -1,0 +1,29 @@
+- name: Define storage controller
+  import_playbook: controller.yml
+
+- hosts: storage_consumers
+  vars:
+    ansible_become: yes
+    storage_setup_consumers: no
+  roles:
+      - {role: storage, node_type: consumer}
+
+  tasks:
+      # This playbook has no info on where this volume is, so do the connect
+      # that will not change anything
+      - name: Get connected volume info
+        storage:
+            resource: volume
+            state: connected
+        register: conn
+
+      - name: Unmount volume
+        mount:
+            fstype: ext4
+            path: "/mnt/mount-{{conn.path.split('/')[-1]}}"
+            state: unmounted
+
+      - name: Disconnect volume
+        storage:
+            resource: volume
+            state: disconnected

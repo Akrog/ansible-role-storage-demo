@@ -1,0 +1,25 @@
+- name: Define storage controller
+  import_playbook: controller.yml
+
+- hosts: storage_consumers
+  vars:
+    ansible_become: yes
+    storage_setup_consumers: no
+  roles:
+      - {role: storage, node_type: consumer}
+
+  tasks:
+      - name: Delete volume
+        storage:
+            resource: volume
+            state: absent
+
+      - name: Get stats
+        storage:
+           resource: backend
+           state: stats
+        register: stats
+        delegate_to: "{{ groups.storage_controller[0] }}"
+
+      - debug:
+           msg: "Backend {{stats.result.volume_backend_name}} has {{stats.result.pools[0].free_capacity_gb}} GB free out of {{stats.result.pools[0].total_capacity_gb}} GB"

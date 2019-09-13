@@ -1,0 +1,8 @@
+- hosts: storage_controller
+  vars:
+    ansible_become: yes
+    storage_setup_providers: no
+  vars_files:
+      - backend-config.yml
+  roles:
+      - {role: storage, node_type: controller}

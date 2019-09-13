@@ -1,0 +1,69 @@
+# These tasks are only necessary because we are not using "real storage".
+- hosts: storage_controller
+  vars:
+    cldir: .
+    vg: ansible-volumes
+    ansible_become: yes
+  tasks:
+      - name: Install LVM2
+        package:
+          name: lvm2
+          state: present
+
+      - name: Create LVM backing file
+        command: "truncate -s 10G {{vg}}"
+        args:
+            creates: "{{cldir}}/{{vg}}"
+
+      - shell: "losetup -l | awk '/{{vg}}/ {print $1}'"
+        changed_when: false
+        register: existing_loop_device
+
+      - name: "Create loopback device {{vg}}"
+        command: "losetup --show -f {{cldir}}/{{vg}}"
+        register: new_loop_device
+        when: existing_loop_device.stdout == ''
+       # Workaround because Ansible destroys registers when skipped
+      - set_fact: loop_device="{{ new_loop_device.stdout if new_loop_device.changed else existing_loop_device.stdout }}"
+
+      - name: "Create VG {{vg}}"
+        shell: "vgcreate {{vg}} {{loop_device}} && touch {{cldir}}/lvm.vgcreate"
+        args:
+            creates: "{{cldir}}/lvm.vgcreate"
+
+      - command: "vgscan --cache"
+        changed_when: false
+
+# Install packages required by the cinderlib provider on the controller node
+- hosts: storage_controller
+  vars:
+    ansible_become: yes
+  vars_files:
+      - backend-config.yml
+  roles:
+      - {role: storage, node_type: controller}
+
+
+# Install packages required by the cinderlib consumer on the consumer nodes
+- hosts: storage_consumers
+  vars:
+    ansible_become: yes
+  roles:
+      - {role: storage, node_type: consumer}
+  # These tasks are necessary because we are using iSCSI
+  tasks:
+      - name: Install iSCSI package
+        package:
+          name: iscsi-initiator-utils
+          state: present
+
+      - name: Create initiator name
+        shell: echo InitiatorName=`iscsi-iname` > /etc/iscsi/initiatorname.iscsi
+        args:
+            creates: /etc/iscsi/initiatorname.iscsi
+
+      - name: Start iSCSI initiator
+        service:
+            name: iscsid
+            state: started
+            enabled: yes

@@ -1,0 +1,7 @@
+---
+storage_backends:
+    lvm:
+        volume_driver: 'cinder.volume.drivers.lvm.LVMVolumeDriver'
+        volume_group: 'ansible-volumes'
+        target_protocol: 'iscsi'
+        target_helper: 'lioadm'

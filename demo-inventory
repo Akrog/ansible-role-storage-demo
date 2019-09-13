@@ -1,0 +1,6 @@
+[storage_controller]
+192.168.1.100
+
+[storage_consumers]
+192.168.1.101
+192.168.1.102

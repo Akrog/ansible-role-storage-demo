@@ -1,0 +1,68 @@
+- name: Define storage controller
+  import_playbook: controller.yml
+
+- hosts: storage_consumers
+  vars:
+    ansible_become: yes
+    storage_setup_consumers: no
+  roles:
+      - {role: storage, node_type: consumer}
+
+  tasks:
+      - name: Extend the volume on the backend and detect it on the host
+        storage:
+            resource: volume
+            state: extended
+            size: 2
+            old_size: 1
+        register: extend
+      - debug:
+          msg: "Volume at {{extend.device.path}} has been extended to {{extend.size}} GB"
+
+      - name: Check partition size
+        command: "lsblk {{extend.device.path}}"
+        register: blk_size
+      - debug:
+          msg: "The full block device size: {{ blk_size.stdout_lines[1].split()[3] }} but the partition is still {{ blk_size.stdout_lines[2].split()[3] }}"
+
+      - name: Unmount volume to extend parition
+        mount:
+            fstype: ext4
+            src: "{{extend.device.path}}"
+            path: "/mnt/mount-{{extend.device.path.split('/')[-1]}}"
+            state: unmounted
+
+      - name: Grow the partition
+        command: 'parted {{extend.device.path}} resizepart 1 100%'
+      - name: Check partition size
+        command: "lsblk {{extend.device.path}}1"
+        register: blk_size
+      - debug:
+          msg: "The partition size is now: {{ blk_size.stdout_lines[1].split()[3] }}"
+
+      - name: Resize filesystem
+        command: "resize2fs -f -F {{extend.device.path}}1"
+
+      - name: Mount volume
+        mount:
+            fstype: ext4
+            src: "{{extend.device.path}}1"
+            path: "/mnt/mount-{{extend.device.path.split('/')[-1]}}"
+            state: mounted
+            boot: no
+
+      - name: Check mounted size
+        command: "df -h /mnt/mount-{{extend.device.path.split('/')[-1]}}"
+        register: mnt_size
+      - debug:
+          msg: "Mounted size {{mnt_size.stdout_lines[1].split()[1]}}"
+
+      - name: Get stats
+        storage:
+           resource: backend
+           state: stats
+        register: stats
+        delegate_to: "{{ groups.storage_controller[0] }}"
+
+      - debug:
+           msg: "Backend {{stats.result.volume_backend_name}} has {{stats.result.pools[0].free_capacity_gb}} GB free out of {{stats.result.pools[0].total_capacity_gb}} GB"
